@@ -7,7 +7,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { createRoot } from 'react-dom/client';
 
 // Firebase SDKs
-import { initializeApp } from 'firebase/app';
+import { initializeApp } from 'firebase';
 import { getAnalytics } from 'firebase/analytics'; // Added for Analytics
 import { 
   getAuth, 
