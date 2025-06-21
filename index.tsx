@@ -8,7 +8,7 @@ import { createRoot } from 'react-dom/client';
 
 // Firebase SDKs
 import { initializeApp } from 'firebase';
-import { getAnalytics } from 'firebase/analytics'; // Added for Analytics
+import { getAnalytics } from 'firebase'; // Added for Analytics
 import { 
   getAuth, 
   onAuthStateChanged, 
@@ -17,7 +17,7 @@ import {
   signOut,
   setPersistence,
   browserLocalPersistence 
-} from 'firebase/auth';
+} from 'firebas/auth';
 import { 
   getFirestore, 
   collection, 
@@ -33,14 +33,14 @@ import {
   onSnapshot,
   writeBatch,
   Timestamp
-} from 'firebase/firestore';
+} from 'firebase';
 import { 
   getStorage, 
   ref, 
   uploadString, 
   getDownloadURL, 
   deleteObject 
-} from 'firebase/storage';
+} from 'firebase';
 
 // Your web app's Firebase configuration - UPDATED
 const firebaseConfig = {
