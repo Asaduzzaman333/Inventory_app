@@ -603,7 +603,6 @@ const App: React.FC = () => {
   const [currentUsername, setCurrentUsername] = useState<string | null>(null);
 
   const [authLoading, setAuthLoading] = useState(true);
-  const [appDataLoading, setAppDataLoading] = useState(true);
   const [loginError, setLoginError] = useState<string | null>(null);
   const [registrationMessage, setRegistrationMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [authViewMode, setAuthViewMode] = useState<'login' | 'register'>('login');
@@ -612,6 +611,13 @@ const App: React.FC = () => {
   const [viewMode, setViewMode] = useState<'admin' | 'stock'>('stock'); // Default to stock view
   const [selectedCategoryForView, setSelectedCategoryForView] = useState<string | null>(null);
   const [selectedSubcategoryForView, setSelectedSubcategoryForView] = useState<string | null>(null);
+
+  // New states for granular loading and seeding control
+  const [initialItemsLoaded, setInitialItemsLoaded] = useState(false);
+  const [initialCategoriesLoaded, setInitialCategoriesLoaded] = useState(false);
+  const [categoriesSeedAttempted, setCategoriesSeedAttempted] = useState(false);
+  const [itemsSeedAttempted, setItemsSeedAttempted] = useState(false);
+
 
   // Firebase Auth state listener
   useEffect(() => {
@@ -625,11 +631,16 @@ const App: React.FC = () => {
           if (userDocSnap.exists()) {
             const userData = userDocSnap.data() as UserDocument;
             setCurrentUsername(userData.username);
-            setViewMode('stock'); // Always default to stock view for any logged-in user
+            setViewMode('stock'); 
+            // Reset data loading flags for new login/data fetch
+            setInitialItemsLoaded(false);
+            setInitialCategoriesLoaded(false);
+            // Seed attempt flags are component-lifetime flags, not reset per login
+            // to prevent re-seeding if an admin intentionally clears data.
           } else {
             console.error("User document not found in Firestore for UID:", user.uid);
             setCurrentUsername(null);
-            await signOut(auth); // Log out if user doc is missing
+            await signOut(auth); 
           }
         } catch (error) {
           console.error("Error fetching user document:", error);
@@ -638,8 +649,11 @@ const App: React.FC = () => {
       } else {
         setCurrentUser(null);
         setCurrentUsername(null);
-        setViewMode('stock'); // Reset to stock if not logged in
-        setAuthViewMode('login'); // Show login screen
+        setViewMode('stock'); 
+        setAuthViewMode('login'); 
+        // Data is not relevant when logged out, so mark as "loaded"
+        setInitialItemsLoaded(true);
+        setInitialCategoriesLoaded(true);
       }
       setAuthLoading(false);
     });
@@ -648,80 +662,91 @@ const App: React.FC = () => {
 
   // Firestore listeners for items and categories
   useEffect(() => {
-    if (!currentUser && !authLoading) { 
-        setAppDataLoading(false); 
+    if (!currentUser) { 
+        setItems([]); // Clear data on logout
+        setCategories([]);
+        setInitialItemsLoaded(true); // Effectively "loaded" as there's nothing for logged-out user
+        setInitialCategoriesLoaded(true);
         return;
     }
-     if (currentUser) { 
-        setAppDataLoading(true);
-        const itemsCollectionRef = collection(db, 'inventoryItems');
-        const unsubscribeItems = onSnapshot(itemsCollectionRef, (snapshot) => {
-          const fetchedItems = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as InventoryItem));
-          setItems(fetchedItems);
-          checkAndSeedInitialData('items', fetchedItems);
-          setAppDataLoading(false); 
-        }, (error) => {
-          console.error("Error fetching items:", error);
-          setAppDataLoading(false);
-        });
 
-        const categoriesCollectionRef = collection(db, 'categories');
-        const unsubscribeCategories = onSnapshot(categoriesCollectionRef, (snapshot) => {
-          const fetchedCategories = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as CategoryDefinition));
-          setCategories(fetchedCategories);
-          checkAndSeedInitialData('categories', fetchedCategories);
-        }, (error) => {
-          console.error("Error fetching categories:", error);
-        });
-        
-        return () => {
-          unsubscribeItems();
-          unsubscribeCategories();
-        };
-    }
-  }, [currentUser, authLoading]); 
+    // When currentUser is valid, start listening and potentially loading data.
+    // Ensure flags are reset if user was previously logged out or changed.
+    // This is handled in onAuthStateChanged for initial set, this effect runs if currentUser changes.
+    // If setInitial...Loaded(false) was missed in onAuthStateChanged for a new user, do it here.
+    if (!initialItemsLoaded) setInitialItemsLoaded(false); // Should be false if new user
+    if (!initialCategoriesLoaded) setInitialCategoriesLoaded(false); // Should be false if new user
 
+    const categoriesCollectionRef = collection(db, 'categories');
+    const unsubscribeCategories = onSnapshot(categoriesCollectionRef, async (snapshot) => {
+        const fetchedCategories = snapshot.docs.map(docData => ({ ...docData.data(), id: docData.id } as CategoryDefinition));
+        setCategories(fetchedCategories);
 
-  // Function to seed initial data if collections are empty
-  const checkAndSeedInitialData = async (collectionName: 'items' | 'categories', currentData: any[]) => {
-    if (currentData.length > 0) return; 
-
-    try {
-        if (collectionName === 'categories') {
-            const categoriesSnapshot = await getDocs(collection(db, 'categories'));
-            if (categoriesSnapshot.empty) {
-                console.log("Seeding initial categories...");
-                const batch = writeBatch(db);
-                INITIAL_CATEGORIES_DATA_NO_ID.forEach(catData => {
-                    const docRef = doc(collection(db, 'categories')); 
-                    batch.set(docRef, catData);
-                });
+        if (snapshot.empty && !categoriesSeedAttempted) {
+            console.log("Categories collection is empty. Attempting to seed...");
+            setCategoriesSeedAttempted(true); 
+            const batch = writeBatch(db);
+            INITIAL_CATEGORIES_DATA_NO_ID.forEach(catData => {
+                const docRef = doc(collection(db, 'categories'));
+                batch.set(docRef, catData);
+            });
+            try {
                 await batch.commit();
-                console.log("Initial categories seeded.");
+                console.log("Initial categories seeded. Listener will update with new data.");
+                // onSnapshot will fire again, leading to setInitialCategoriesLoaded(true) then.
+            } catch (error) {
+                console.error("Error seeding categories:", error);
+                setInitialCategoriesLoaded(true); // Unblock UI on seeding error
             }
-        } else if (collectionName === 'items') {
-            const categoriesSnapshot = await getDocs(collection(db, 'categories'));
-            if (categoriesSnapshot.empty && categories.length === 0) { 
-                console.log("Waiting for categories to seed before seeding items...");
-                return; 
-            }
+        } else {
+            setInitialCategoriesLoaded(true); // Mark loaded if not empty or seed already attempted
+        }
+    }, (error) => {
+        console.error("Error fetching categories:", error);
+        setInitialCategoriesLoaded(true); 
+    });
 
-            const itemsSnapshot = await getDocs(collection(db, 'inventoryItems'));
-            if (itemsSnapshot.empty) {
-                console.log("Seeding initial items...");
+    const itemsCollectionRef = collection(db, 'inventoryItems');
+    const unsubscribeItems = onSnapshot(itemsCollectionRef, async (snapshot) => {
+        const fetchedItems = snapshot.docs.map(docData => ({ ...docData.data(), id: docData.id } as InventoryItem));
+        setItems(fetchedItems);
+
+        if (snapshot.empty && !itemsSeedAttempted && initialCategoriesLoaded) { // Only attempt if categories have processed
+            console.log("Items collection is empty. Checking categories before attempting to seed items...");
+            setItemsSeedAttempted(true); 
+
+            // Use 'categories' state which is updated by its own listener
+            if (categories.length > 0) {
+                console.log("Categories exist. Seeding initial items...");
                 const batch = writeBatch(db);
                 INITIAL_ITEMS_DATA_NO_ID.forEach(itemData => {
-                    const docRef = doc(collection(db, 'inventoryItems')); 
+                    const docRef = doc(collection(db, 'inventoryItems'));
                     batch.set(docRef, itemData);
                 });
-                await batch.commit();
-                console.log("Initial items seeded.");
+                try {
+                    await batch.commit();
+                    console.log("Initial items seeded. Listener will update with new data.");
+                } catch (error) {
+                    console.error("Error seeding items:", error);
+                    setInitialItemsLoaded(true); // Unblock UI on seeding error
+                }
+            } else {
+                console.log("Skipping item seeding as categories are empty even after category listener processing.");
+                setInitialItemsLoaded(true); // Mark loaded as no items to seed due to no categories
             }
+        } else {
+             setInitialItemsLoaded(true); // Mark loaded if not empty, seed attempted, or categories not ready
         }
-    } catch (error) {
-        console.error(`Error seeding ${collectionName}:`, error);
-    }
-  };
+    }, (error) => {
+        console.error("Error fetching items:", error);
+        setInitialItemsLoaded(true); 
+    });
+    
+    return () => {
+      unsubscribeItems();
+      unsubscribeCategories();
+    };
+  }, [currentUser]); // Effect re-runs when currentUser changes
 
 
   const handleLogin = async (email: string, password_raw: string) => {
@@ -803,7 +828,6 @@ const App: React.FC = () => {
   };
 
   const openModal = (item: InventoryItem | null = null) => {
-    // Access controlled by button visibility (viewMode === 'admin')
     setEditingItem(item);
     setIsModalOpen(true);
   };
@@ -814,7 +838,7 @@ const App: React.FC = () => {
   }, []);
 
   const handleSaveItem = useCallback(async (itemToSave: InventoryItem) => {
-    if (!currentUser || !itemToSave) return; // Should be in admin view, thus logged in
+    if (!currentUser || !itemToSave) return; 
 
     let validatedCategory = itemToSave.category;
     let validatedSubcategory = itemToSave.subcategory;
@@ -865,7 +889,7 @@ const App: React.FC = () => {
   }, [closeModal, currentUser, categories]);
 
   const handleDeleteItem = async (itemId: string) => {
-    if (!currentUser || !itemId) return; // Should be in admin view
+    if (!currentUser || !itemId) return; 
     if (window.confirm('Are you sure you want to delete this item?')) {
       try {
         const itemDocRef = doc(db, 'inventoryItems', itemId);
@@ -884,7 +908,7 @@ const App: React.FC = () => {
   };
 
   const handleSellItemSize = useCallback(async (itemId: string, sizeToSell: Size) => {
-    if (!currentUser || !itemId) return; // User must be logged in
+    if (!currentUser || !itemId) return; 
 
     const itemRef = doc(db, 'inventoryItems', itemId);
     const item = items.find(i => i.id === itemId);
@@ -912,7 +936,6 @@ const App: React.FC = () => {
   );
 
   const toggleViewMode = () => {
-    // Available to all logged-in users
     setViewMode(prevMode => {
         const newMode = prevMode === 'admin' ? 'stock' : 'admin';
         if (newMode === 'stock') { 
@@ -1055,8 +1078,15 @@ const handleDeleteSubcategory = async (categoryId: string, categoryName: string,
     return items.filter(item => item.category === categoryName && item.subcategory === subcategoryName).length;
   }, [items]);
 
-  if (authLoading || (currentUser && appDataLoading)) {
-    return <div className="loading-container"><p>Loading application...</p></div>; 
+
+  if (authLoading) {
+    return <div className="loading-container"><p>Authenticating...</p></div>;
+  }
+  if (currentUser && (!initialItemsLoaded || !initialCategoriesLoaded)) {
+    let statusParts: string[] = [];
+    if (!initialCategoriesLoaded) statusParts.push("categories");
+    if (!initialItemsLoaded) statusParts.push("inventory data");
+    return <div className="loading-container"><p>Loading {statusParts.join(" and ")}...</p></div>; 
   }
   
   if (!currentUser) { 
@@ -1091,7 +1121,7 @@ const handleDeleteSubcategory = async (categoryId: string, categoryName: string,
               aria-label="Search inventory items"
             />
           )}
-          {currentUser && ( // Always show toggle button if logged in
+          {currentUser && ( 
             <button 
               onClick={toggleViewMode} 
               className="btn btn-info" 
@@ -1100,7 +1130,7 @@ const handleDeleteSubcategory = async (categoryId: string, categoryName: string,
               {viewMode === 'admin' ? 'View Product Stock' : 'View Admin Panel'}
             </button>
           )}
-          {viewMode === 'admin' && ( // Show "Add New Item" only in admin view
+          {viewMode === 'admin' && ( 
             <button onClick={() => openModal()} className="btn btn-primary" aria-label="Add new item">
               Add New Item
             </button>
@@ -1111,7 +1141,7 @@ const handleDeleteSubcategory = async (categoryId: string, categoryName: string,
         </div>
       </header>
 
-      {viewMode === 'admin' && isModalOpen && ( // Show modal only in admin view
+      {viewMode === 'admin' && isModalOpen && ( 
         <ItemModal
           item={editingItem}
           onClose={closeModal}
@@ -1123,7 +1153,7 @@ const handleDeleteSubcategory = async (categoryId: string, categoryName: string,
         />
       )}
       
-      {viewMode === 'admin' ? ( // Display content based on viewMode
+      {viewMode === 'admin' ? ( 
         <>
           <AdminCategoryManager
             categories={categories}
