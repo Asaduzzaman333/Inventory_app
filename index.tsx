@@ -44,13 +44,13 @@ import {
 
 // Your web app's Firebase configuration - UPDATED
 const firebaseConfig = {
-  apiKey: "AIzaSyC4miS_z3ybRGkdjQKqFdNodO7W-yoClK8",
-  authDomain: "inventoryapp-5e571.firebaseapp.com",
-  projectId: "inventoryapp-5e571",
-  storageBucket: "inventoryapp-5e571.firebasestorage.app", // Corrected as per your new config
-  messagingSenderId: "532115144135",
-  appId: "1:532115144135:web:7f59563a06857ea6e02de2",
-  measurementId: "G-5SEQD7645G" // Added measurementId
+  apiKey: "AIzaSyBIImR4Mo2wivi-uS5kFtOpq66i447gAXE",
+  authDomain: "inventory-2243a.firebaseapp.com",
+  projectId: "inventory-2243a",
+  storageBucket: "inventory-2243a.firebasestorage.app",
+  messagingSenderId: "866425223930",
+  appId: "1:866425223930:web:20da328d133bc26a152743",
+  measurementId: "G-W0E70F85NR"
 };
 
 // Initialize Firebase
