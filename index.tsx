@@ -8,7 +8,7 @@ import { createRoot } from 'react-dom/client';
 
 // Firebase SDKs
 import { initializeApp } from 'firebase/app';
-import { getAnalytics } from 'firebase/firestore'; // Added for Analytics
+import { getAnalytics } from 'firebase/analytics'; // Added for Analytics
 import { 
   getAuth, 
   onAuthStateChanged, 
@@ -17,7 +17,7 @@ import {
   signOut,
   setPersistence,
   browserLocalPersistence 
-} from 'firebas/auth';
+} from 'firebase/auth';
 import { 
   getFirestore, 
   collection, 
@@ -33,24 +33,24 @@ import {
   onSnapshot,
   writeBatch,
   Timestamp
-} from 'firebase';
+} from 'firebase/firestore';
 import { 
   getStorage, 
   ref, 
   uploadString, 
   getDownloadURL, 
   deleteObject 
-} from 'firebase';
+} from 'firebase/storage';
 
 // Your web app's Firebase configuration - UPDATED
 const firebaseConfig = {
-  apiKey: "AIzaSyBIImR4Mo2wivi-uS5kFtOpq66i447gAXE",
-  authDomain: "inventory-2243a.firebaseapp.com",
-  projectId: "inventory-2243a",
-  storageBucket: "inventory-2243a.firebasestorage.app",
-  messagingSenderId: "866425223930",
-  appId: "1:866425223930:web:20da328d133bc26a152743",
-  measurementId: "G-W0E70F85NR"
+  apiKey: "AIzaSyC4miS_z3ybRGkdjQKqFdNodO7W-yoClK8",
+  authDomain: "inventoryapp-5e571.firebaseapp.com",
+  projectId: "inventoryapp-5e571",
+  storageBucket: "inventoryapp-5e571.firebasestorage.app", // Corrected as per your new config
+  messagingSenderId: "532115144135",
+  appId: "1:532115144135:web:7f59563a06857ea6e02de2",
+  measurementId: "G-5SEQD7645G" // Added measurementId
 };
 
 // Initialize Firebase
