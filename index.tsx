@@ -69,13 +69,11 @@ setPersistence(auth, browserLocalPersistence)
 
 const SIZES = ["XS", "S", "M", "L", "XL", "XXL", "3XL"] as const;
 type Size = typeof SIZES[number];
-type UserRole = 'admin' | 'user' | null;
 
 interface UserDocument { // For Firestore 'users' collection
   uid: string;
   email: string;
   username: string;
-  role: UserRole;
   createdAt: Timestamp;
 }
 
@@ -128,8 +126,8 @@ interface ProductStockViewProps {
   onSelectSubcategory: (categoryName: string, subcategoryName: string) => void;
   onNavigateBack: () => void;
   onSellItemSize: (itemId: string, size: Size) => void;
-  userRole: UserRole;
   getCategoryItemCount: (categoryName: string, subcategoryName: string) => number;
+  currentUser: import('firebase/auth').User | null; // Added to conditionally show "Sell 1" button
 }
 
 const ProductStockView: React.FC<ProductStockViewProps> = ({
@@ -141,8 +139,8 @@ const ProductStockView: React.FC<ProductStockViewProps> = ({
   onSelectSubcategory,
   onNavigateBack,
   onSellItemSize,
-  userRole,
   getCategoryItemCount,
+  currentUser,
 }) => {
   if (!selectedCategoryName) {
     return (
@@ -251,7 +249,7 @@ const ProductStockView: React.FC<ProductStockViewProps> = ({
                 <li key={size}>
                   <span className="size-label">{size}:</span>
                   <span className="size-quantity">{item.sizes[size] || 0}</span>
-                  {userRole === 'admin' && (
+                  {currentUser && ( // Show "Sell 1" if user is logged in
                     <button
                       onClick={() => onSellItemSize(item.id, size)}
                       disabled={(item.sizes[size] || 0) === 0}
@@ -602,7 +600,6 @@ const App: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
   
   const [currentUser, setCurrentUser] = useState<import('firebase/auth').User | null>(null);
-  const [currentUserRole, setCurrentUserRole] = useState<UserRole>(null);
   const [currentUsername, setCurrentUsername] = useState<string | null>(null);
 
   const [authLoading, setAuthLoading] = useState(true);
@@ -627,26 +624,19 @@ const App: React.FC = () => {
           const userDocSnap = await getDoc(userDocRef);
           if (userDocSnap.exists()) {
             const userData = userDocSnap.data() as UserDocument;
-            setCurrentUserRole(userData.role);
             setCurrentUsername(userData.username);
-            setViewMode(userData.role === 'admin' ? 'admin' : 'stock');
+            setViewMode('stock'); // Always default to stock view for any logged-in user
           } else {
             console.error("User document not found in Firestore for UID:", user.uid);
-            // This case should ideally not happen if registration is correct
-            // Fallback or force logout
-            setCurrentUserRole(null);
             setCurrentUsername(null);
             await signOut(auth); // Log out if user doc is missing
           }
         } catch (error) {
           console.error("Error fetching user document:", error);
-          setCurrentUserRole(null);
           setCurrentUsername(null);
-          // Optionally sign out the user if role fetch fails
         }
       } else {
         setCurrentUser(null);
-        setCurrentUserRole(null);
         setCurrentUsername(null);
         setViewMode('stock'); // Reset to stock if not logged in
         setAuthViewMode('login'); // Show login screen
@@ -658,18 +648,18 @@ const App: React.FC = () => {
 
   // Firestore listeners for items and categories
   useEffect(() => {
-    if (!currentUser && !authLoading) { // Don't fetch if not logged in and auth check is done
-        setAppDataLoading(false); // No data to load for non-logged-in state
+    if (!currentUser && !authLoading) { 
+        setAppDataLoading(false); 
         return;
     }
-     if (currentUser) { // Only fetch if user is logged in
+     if (currentUser) { 
         setAppDataLoading(true);
         const itemsCollectionRef = collection(db, 'inventoryItems');
         const unsubscribeItems = onSnapshot(itemsCollectionRef, (snapshot) => {
           const fetchedItems = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as InventoryItem));
           setItems(fetchedItems);
           checkAndSeedInitialData('items', fetchedItems);
-          setAppDataLoading(false); // Set to false after items potentially loaded
+          setAppDataLoading(false); 
         }, (error) => {
           console.error("Error fetching items:", error);
           setAppDataLoading(false);
@@ -680,7 +670,6 @@ const App: React.FC = () => {
           const fetchedCategories = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as CategoryDefinition));
           setCategories(fetchedCategories);
           checkAndSeedInitialData('categories', fetchedCategories);
-           // appDataLoading handled by items listener primarily
         }, (error) => {
           console.error("Error fetching categories:", error);
         });
@@ -690,12 +679,12 @@ const App: React.FC = () => {
           unsubscribeCategories();
         };
     }
-  }, [currentUser, authLoading]); // Re-run if currentUser or authLoading changes
+  }, [currentUser, authLoading]); 
 
 
   // Function to seed initial data if collections are empty
   const checkAndSeedInitialData = async (collectionName: 'items' | 'categories', currentData: any[]) => {
-    if (currentData.length > 0) return; // Data already exists or is being loaded
+    if (currentData.length > 0) return; 
 
     try {
         if (collectionName === 'categories') {
@@ -704,16 +693,15 @@ const App: React.FC = () => {
                 console.log("Seeding initial categories...");
                 const batch = writeBatch(db);
                 INITIAL_CATEGORIES_DATA_NO_ID.forEach(catData => {
-                    const docRef = doc(collection(db, 'categories')); // Auto-generate ID
+                    const docRef = doc(collection(db, 'categories')); 
                     batch.set(docRef, catData);
                 });
                 await batch.commit();
                 console.log("Initial categories seeded.");
             }
         } else if (collectionName === 'items') {
-             // Ensure categories are loaded/seeded before items that depend on them
             const categoriesSnapshot = await getDocs(collection(db, 'categories'));
-            if (categoriesSnapshot.empty && categories.length === 0) { // Wait if categories are also empty and not yet in state
+            if (categoriesSnapshot.empty && categories.length === 0) { 
                 console.log("Waiting for categories to seed before seeding items...");
                 return; 
             }
@@ -723,7 +711,7 @@ const App: React.FC = () => {
                 console.log("Seeding initial items...");
                 const batch = writeBatch(db);
                 INITIAL_ITEMS_DATA_NO_ID.forEach(itemData => {
-                    const docRef = doc(collection(db, 'inventoryItems')); // Auto-generate ID
+                    const docRef = doc(collection(db, 'inventoryItems')); 
                     batch.set(docRef, itemData);
                 });
                 await batch.commit();
@@ -741,10 +729,10 @@ const App: React.FC = () => {
     setLoginError(null);
     try {
       await signInWithEmailAndPassword(auth, email, password_raw);
-      // onAuthStateChanged will handle setting user state
       setRegistrationMessage(null);
       setSelectedCategoryForView(null);
       setSelectedSubcategoryForView(null);
+      // onAuthStateChanged will handle setting user state and viewMode
     } catch (error: any) {
       console.error("Login error:", error);
       setLoginError(error.message || "Invalid email or password.");
@@ -768,7 +756,6 @@ const App: React.FC = () => {
     }
 
     try {
-      // Check if username is already taken
       const usersRef = collection(db, "users");
       const usernameQuery = query(usersRef, where("username", "==", username));
       const usernameQuerySnapshot = await getDocs(usernameQuery);
@@ -780,32 +767,17 @@ const App: React.FC = () => {
 
       const userCredential = await createUserWithEmailAndPassword(auth, email, password_raw);
       const user = userCredential.user;
-
-      let role: UserRole = 'user';
-      const designatedAdminEmail = "admin@gmail.com";
-
-      if (email.toLowerCase() === designatedAdminEmail.toLowerCase()) {
-          role = 'admin';
-      } else {
-          // Check if any admin already exists
-          const adminQuery = query(usersRef, where("role", "==", "admin"));
-          const adminQuerySnapshot = await getDocs(adminQuery);
-          if (adminQuerySnapshot.empty) { // No admins exist yet
-              role = 'admin'; // Make this user the first admin
-          }
-      }
       
       const newUserDoc: UserDocument = { 
         uid: user.uid, 
         email: user.email!, 
         username, 
-        role,
         createdAt: Timestamp.now()
       };
       await setDoc(doc(db, 'users', user.uid), newUserDoc);
       
       setRegistrationMessage({ type: 'success', text: "Registration successful! Please login." });
-      setAuthViewMode('login'); // Switch to login view after successful registration
+      setAuthViewMode('login'); 
     } catch (error: any) {
       console.error("Registration error:", error);
        if (error.code === 'auth/email-already-in-use') {
@@ -820,18 +792,18 @@ const App: React.FC = () => {
   const handleLogout = async () => {
     try {
       await signOut(auth);
-      // onAuthStateChanged will clear user state
       setLoginError(null);
       setRegistrationMessage(null);
       setSelectedCategoryForView(null);
       setSelectedSubcategoryForView(null);
+      // onAuthStateChanged will clear user state and reset viewMode
     } catch (error) {
       console.error("Logout error:", error);
     }
   };
 
   const openModal = (item: InventoryItem | null = null) => {
-    if (currentUserRole !== 'admin') return;
+    // Access controlled by button visibility (viewMode === 'admin')
     setEditingItem(item);
     setIsModalOpen(true);
   };
@@ -842,7 +814,7 @@ const App: React.FC = () => {
   }, []);
 
   const handleSaveItem = useCallback(async (itemToSave: InventoryItem) => {
-    if (currentUserRole !== 'admin' || !itemToSave) return;
+    if (!currentUser || !itemToSave) return; // Should be in admin view, thus logged in
 
     let validatedCategory = itemToSave.category;
     let validatedSubcategory = itemToSave.subcategory;
@@ -857,7 +829,6 @@ const App: React.FC = () => {
             validatedSubcategory = 'Default';
             const parentCatDef = categories.find(c => c.name === validatedCategory);
             if (parentCatDef && !parentCatDef.subcategories.includes('Default')) {
-                // This local category update needs to be a Firestore update now
                  try {
                     await updateDoc(doc(db, 'categories', parentCatDef.id), {
                         subcategories: [...new Set([...parentCatDef.subcategories, 'Default'])].sort()
@@ -880,10 +851,10 @@ const App: React.FC = () => {
     };
     
     try {
-      if (itemToSave.id) { // Editing existing item
+      if (itemToSave.id) { 
         const itemDocRef = doc(db, 'inventoryItems', itemToSave.id);
         await updateDoc(itemDocRef, finalItemData);
-      } else { // Adding new item
+      } else { 
         await addDoc(collection(db, 'inventoryItems'), finalItemData);
       }
       closeModal();
@@ -891,16 +862,15 @@ const App: React.FC = () => {
       console.error("Error saving item to Firestore:", error);
       alert("Failed to save item. Please check console for details.");
     }
-  }, [closeModal, currentUserRole, categories]);
+  }, [closeModal, currentUser, categories]);
 
   const handleDeleteItem = async (itemId: string) => {
-    if (currentUserRole !== 'admin' || !itemId) return; 
+    if (!currentUser || !itemId) return; // Should be in admin view
     if (window.confirm('Are you sure you want to delete this item?')) {
       try {
         const itemDocRef = doc(db, 'inventoryItems', itemId);
         const itemToDelete = items.find(i => i.id === itemId);
 
-        // Delete image from storage if it exists
         if (itemToDelete?.imageStoragePath) {
           const imageRef = ref(storage, itemToDelete.imageStoragePath);
           await deleteObject(imageRef).catch(err => console.warn("Error deleting image from storage, it might not exist or rules issue:", err));
@@ -914,8 +884,7 @@ const App: React.FC = () => {
   };
 
   const handleSellItemSize = useCallback(async (itemId: string, sizeToSell: Size) => {
-    if (viewMode !== 'stock' && currentUserRole !== 'admin') return; 
-    if (!itemId) return;
+    if (!currentUser || !itemId) return; // User must be logged in
 
     const itemRef = doc(db, 'inventoryItems', itemId);
     const item = items.find(i => i.id === itemId);
@@ -931,7 +900,7 @@ const App: React.FC = () => {
             }
         }
     }
-  }, [currentUserRole, viewMode, items]); 
+  }, [currentUser, items]); 
 
   const filteredItemsForAdminTable = items.filter(item =>
     item.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -943,7 +912,7 @@ const App: React.FC = () => {
   );
 
   const toggleViewMode = () => {
-    if (currentUserRole !== 'admin') return;
+    // Available to all logged-in users
     setViewMode(prevMode => {
         const newMode = prevMode === 'admin' ? 'stock' : 'admin';
         if (newMode === 'stock') { 
@@ -973,7 +942,6 @@ const App: React.FC = () => {
     
     try {
         const batch = writeBatch(db);
-        // Reassign items
         const q = query(collection(db, "inventoryItems"), where("category", "==", categoryName));
         const querySnapshot = await getDocs(q);
         querySnapshot.forEach((itemDoc) => {
@@ -1032,19 +1000,16 @@ const handleDeleteSubcategory = async (categoryId: string, categoryName: string,
         
         let updatedSubcategories = parentCategory.subcategories.filter(sub => sub !== subcategoryName);
         
-        // Reassign items from this subcategory to 'Default'
         const itemsToReassignQuery = query(collection(db, "inventoryItems"), 
             where("category", "==", categoryName), 
             where("subcategory", "==", subcategoryName)
         );
         const itemsToReassignSnapshot = await getDocs(itemsToReassignQuery);
         
-        let defaultSubcategoryEnsured = false;
         if (!itemsToReassignSnapshot.empty) {
             if (subcategoryName !== 'Default' && !updatedSubcategories.includes('Default')) {
                 updatedSubcategories.push('Default');
                 updatedSubcategories.sort();
-                defaultSubcategoryEnsured = true;
             }
             itemsToReassignSnapshot.forEach((itemDoc) => {
                 const itemRef = doc(db, "inventoryItems", itemDoc.id);
@@ -1053,15 +1018,14 @@ const handleDeleteSubcategory = async (categoryId: string, categoryName: string,
         }
         
         if (categoryName !== 'Uncategorized' && updatedSubcategories.length === 0) {
-          updatedSubcategories.push('Default'); // Ensure parent always has at least 'Default'
-          defaultSubcategoryEnsured = true;
+          updatedSubcategories.push('Default'); 
         }
 
         batch.update(categoryDocRef, { subcategories: updatedSubcategories });
         await batch.commit();
 
         if (selectedCategoryForView === categoryName && selectedSubcategoryForView === subcategoryName) {
-            setSelectedSubcategoryForView(null); // Or 'Default' if items were moved there
+            setSelectedSubcategoryForView(null); 
         }
     } catch (error) {
         console.error("Error deleting subcategory and reassigning items:", error);
@@ -1112,13 +1076,12 @@ const handleDeleteSubcategory = async (categoryId: string, categoryName: string,
            />;
   }
 
-  // At this point, currentUser is not null.
   return (
     <div className="container">
       <header className="app-header">
-        <h1>Inventory Management {currentUserRole === 'admin' && <span className="admin-badge">(Admin)</span>}</h1>
+        <h1>Inventory Management</h1>
         <div className="header-controls">
-          {currentUserRole === 'admin' && viewMode === 'admin' && (
+          {viewMode === 'admin' && (
             <input
               type="text"
               placeholder="Search by name or SKU (in table)..."
@@ -1128,7 +1091,7 @@ const handleDeleteSubcategory = async (categoryId: string, categoryName: string,
               aria-label="Search inventory items"
             />
           )}
-          {currentUserRole === 'admin' && (
+          {currentUser && ( // Always show toggle button if logged in
             <button 
               onClick={toggleViewMode} 
               className="btn btn-info" 
@@ -1137,7 +1100,7 @@ const handleDeleteSubcategory = async (categoryId: string, categoryName: string,
               {viewMode === 'admin' ? 'View Product Stock' : 'View Admin Panel'}
             </button>
           )}
-          {currentUserRole === 'admin' && viewMode === 'admin' && (
+          {viewMode === 'admin' && ( // Show "Add New Item" only in admin view
             <button onClick={() => openModal()} className="btn btn-primary" aria-label="Add new item">
               Add New Item
             </button>
@@ -1148,7 +1111,7 @@ const handleDeleteSubcategory = async (categoryId: string, categoryName: string,
         </div>
       </header>
 
-      {currentUserRole === 'admin' && viewMode === 'admin' && isModalOpen && (
+      {viewMode === 'admin' && isModalOpen && ( // Show modal only in admin view
         <ItemModal
           item={editingItem}
           onClose={closeModal}
@@ -1160,7 +1123,7 @@ const handleDeleteSubcategory = async (categoryId: string, categoryName: string,
         />
       )}
       
-      {currentUserRole === 'admin' && viewMode === 'admin' ? (
+      {viewMode === 'admin' ? ( // Display content based on viewMode
         <>
           <AdminCategoryManager
             categories={categories}
@@ -1239,8 +1202,8 @@ const handleDeleteSubcategory = async (categoryId: string, categoryName: string,
           onSelectSubcategory={handleSelectSubcategoryForView}
           onNavigateBack={handleNavigateBackFromStockView}
           onSellItemSize={handleSellItemSize}
-          userRole={currentUserRole}
           getCategoryItemCount={getCategoryItemCount}
+          currentUser={currentUser}
         />
       )}
       <footer className="app-footer">
@@ -1258,18 +1221,18 @@ interface ItemModalFormData {
   sizes: Record<Size, number>;
   price: number;
   description?: string;
-  imageUrl?: string; // Can be Base64 (new) or Firebase URL (existing)
-  imageStoragePath?: string; // Path for Firebase Storage
+  imageUrl?: string; 
+  imageStoragePath?: string;
 }
 
 interface ItemModalProps {
   item: InventoryItem | null;
   onClose: () => void;
-  onSave: (item: InventoryItem) => Promise<void>; // Item ID is now part of InventoryItem
+  onSave: (item: InventoryItem) => Promise<void>; 
   categories: CategoryDefinition[];
-  storage: import('firebase/storage').FirebaseStorage; // Pass storage instance
-  db: import('firebase/firestore').Firestore; // Pass db instance
-  editingItemId: string | null; // Explicitly pass ID for clarity
+  storage: import('firebase/storage').FirebaseStorage; 
+  db: import('firebase/firestore').Firestore; 
+  editingItemId: string | null; 
 }
 
 const ItemModal: React.FC<ItemModalProps> = ({ item, onClose, onSave, categories, storage, db, editingItemId }) => {
@@ -1335,7 +1298,7 @@ const ItemModal: React.FC<ItemModalProps> = ({ item, onClose, onSave, categories
   const [formData, setFormData] = useState<ItemModalFormData>(getInitialFormData());
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [isProcessing, setIsProcessing] = useState(false);
-  const [newImageFile, setNewImageFile] = useState<File | null>(null); // Store the actual file for upload
+  const [newImageFile, setNewImageFile] = useState<File | null>(null); 
 
   
   const availableSubcategories = categories.find(c => c.name === formData.category)?.subcategories || [];
@@ -1413,11 +1376,10 @@ const ItemModal: React.FC<ItemModalProps> = ({ item, onClose, onSave, categories
         setNewImageFile(null);
         return;
       }
-      setNewImageFile(file); // Store file for upload
-      // Display a preview using FileReader (Base64)
+      setNewImageFile(file); 
       const reader = new FileReader();
       reader.onloadend = () => {
-        setFormData(prev => ({ ...prev, imageUrl: reader.result as string })); // Temporary Base64 for preview
+        setFormData(prev => ({ ...prev, imageUrl: reader.result as string })); 
          setErrors(prev => ({ ...prev, imageUrlFile: undefined }));
       };
       reader.onerror = () => {
@@ -1431,8 +1393,8 @@ const ItemModal: React.FC<ItemModalProps> = ({ item, onClose, onSave, categories
   };
 
   const handleRemoveImage = async () => {
-    setFormData(prev => ({ ...prev, imageUrl: '', imageStoragePath: '' })); // Clear preview and storage path
-    setNewImageFile(null); // Clear staged file
+    setFormData(prev => ({ ...prev, imageUrl: '', imageStoragePath: '' })); 
+    setNewImageFile(null); 
     const fileInput = document.getElementById('imageUrlFile') as HTMLInputElement | null;
     if (fileInput) fileInput.value = ''; 
     setErrors(prev => ({ ...prev, imageUrlFile: undefined }));
@@ -1463,7 +1425,7 @@ const ItemModal: React.FC<ItemModalProps> = ({ item, onClose, onSave, categories
       if (sizeQuantity < 0) newErrors[`size_${size}`] = `Qty for ${size} cannot be negative.`;
       else if (isNaN(sizeQuantity)) newErrors[`size_${size}`] = `Qty for ${size} must be a number.`;
     });
-    if (errors.imageUrlFile) newErrors.imageUrlFile = errors.imageUrlFile; // Persist file-related error
+    if (errors.imageUrlFile) newErrors.imageUrlFile = errors.imageUrlFile; 
 
     setErrors(newErrors);
     return Object.keys(newErrors).filter(key => key !== 'imageUrlFile' || newErrors.imageUrlFile).length === 0;
@@ -1474,13 +1436,11 @@ const ItemModal: React.FC<ItemModalProps> = ({ item, onClose, onSave, categories
     if (!validate()) return;
     setIsProcessing(true);
 
-    let finalImageUrl = formData.imageUrl; // Could be existing Firebase URL or Base64 preview
+    let finalImageUrl = formData.imageUrl; 
     let finalImageStoragePath = formData.imageStoragePath;
-    const oldImageStoragePath = item?.imageStoragePath; // Path of the image before this edit
+    const oldImageStoragePath = item?.imageStoragePath; 
 
-    // Handle image upload/delete
-    if (newImageFile) { // New image selected for upload
-        // If there was an old image, delete it from storage
+    if (newImageFile) { 
         if (oldImageStoragePath) {
             const oldImageRef = ref(storage, oldImageStoragePath);
             try {
@@ -1492,7 +1452,7 @@ const ItemModal: React.FC<ItemModalProps> = ({ item, onClose, onSave, categories
         finalImageStoragePath = `inventory_images/${Date.now()}_${newImageFile.name}`;
         const newImageRef = ref(storage, finalImageStoragePath);
         try {
-            const uploadResult = await uploadString(newImageRef, formData.imageUrl!, 'data_url'); // formData.imageUrl is Base64 preview
+            const uploadResult = await uploadString(newImageRef, formData.imageUrl!, 'data_url'); 
             finalImageUrl = await getDownloadURL(uploadResult.ref);
         } catch (uploadError) {
             console.error("Error uploading image to Firebase Storage:", uploadError);
@@ -1500,19 +1460,18 @@ const ItemModal: React.FC<ItemModalProps> = ({ item, onClose, onSave, categories
             setIsProcessing(false);
             return;
         }
-    } else if (!formData.imageUrl && oldImageStoragePath) { // Image was removed (formData.imageUrl is empty)
+    } else if (!formData.imageUrl && oldImageStoragePath) { 
         const oldImageRef = ref(storage, oldImageStoragePath);
         try {
             await deleteObject(oldImageRef);
-            finalImageStoragePath = ''; // Clear path
+            finalImageStoragePath = ''; 
         } catch (err) {
             console.warn("Could not delete removed image:", err);
         }
     }
-    // If !newImageFile and formData.imageUrl is not empty, it means existing image is kept.
 
     const itemDataForSave: InventoryItem = {
-      id: editingItemId || '', // ID will be set by onSave for new items via Firestore's addDoc
+      id: editingItemId || '', 
       name: formData.name,
       sku: formData.sku,
       category: formData.category,
@@ -1530,7 +1489,6 @@ const ItemModal: React.FC<ItemModalProps> = ({ item, onClose, onSave, categories
         console.error("Error during onSave callback in ItemModal:", error);
     } finally {
         setIsProcessing(false);
-        // onClose is called by App after successful save
     }
   };
   
